@@ -1,1 +1,112 @@
-Looping Vehicles
+
+
+Option 1. select only active vehicles
+
+	for rec1 in (Select ct_report_limit as vehicle_id from fleet.ct_report_limit(in_user_id,in_client_user_id,in_vehicle_limit)) 
+	loop
+
+
+Option 2 features also cancelled vehicles
+
+FOR rec IN SELECT * FROM fleet.fleet_vehicle cv WHERE cv.user_id = p_user_id ORDER BY cv.registration 
+loop
+
+
+Option 3 
+FOR mviews IN (select vehicle_id, user_name from fleet.client_sync where vehicle_id = any(array(select * from fleet.ct_report_limit(in_user_id,in_client_user_id,in_vehicle_limit))) or vehicle_id =
+any(array((select vehicle_id from ct.contract where sale_agent_id = in_user_id and contract_state_id = 2))))
+LOOP
+
+
+
+
+
+The FUCTION USED 
+CREATE OR REPLACE FUNCTION fleet.ct_report_limit
+(
+IN user_id_in bigint ,
+IN sub_client_in character varying ,
+IN vehicle_id_in character varying
+)
+$BODY$
+RETURNS bigint AS 
+
+DECLARE
+	mviews RECORD;
+	v_group_id bigint;
+
+	/*
+	Function Description 		: unknown
+	Create Date                     : unknown
+	Author                          : unknown
+	Updates                     Author         Date            Reason / Modification
+                                --------------------------------------------------------------------------------------------------------------------------------------------------------
+                                 kdv             2016-06-07		someone added an = in the wrong place 
+									and added ilike if(vehicle_id_in = 'All') then
+*/
+BEGIN
+	if(vehicle_id_in ilike 'All' and sub_client_in != '0') then
+		raise notice 'subuser';
+		FOR mviews IN SELECT * FROM 
+		(select * from
+			(
+				(select vehicle_id from fleet.v_client_user_vehicle where user_id=user_id_in and client_user_id=sub_client_in)
+				UNION
+				(select gvl.vehicle_id from 
+					(select group_vehicle_id from fleet.client_user_to_vehicle_group_access  WHERE user_id=user_id_in and client_user_id=sub_client_in) as cutvga
+						INNER JOIN fleet.group_vehicle_link gvl ON gvl.group_vehicle_id = cutvga.group_vehicle_id)
+			) as cv1 
+		) as cv LOOP
+			--raise notice 'AA';
+			return next mviews.vehicle_id;
+		END LOOP;
+		RETURN;
+	end if;
+
+	if( position('g-' in vehicle_id_in) != '0' ) then
+raise notice '1';	
+		v_group_id :=  cast(ltrim(vehicle_id_in,'g-') as bigint);
+		--raise notice '---------- % ', v_group_id;
+		FOR mviews IN 
+
+		Select gvl.vehicle_id 
+		from fleet.group_vehicle_link  gvl
+		inner join fleet.group_vehicle gv using (group_vehicle_id) 
+		inner join fleet.client_sync cs on gvl.vehicle_id = cs.vehicle_id and cs.user_id = user_id_in
+		where v_group_id = gv.group_vehicle_id 
+		
+		--and user_id = user_id_in
+		 LOOP
+			return next mviews.vehicle_id;
+		END LOOP;
+		RETURN;
+	end if;
+	if( position('TempGroup-' in vehicle_id_in) != '0' ) then
+raise notice '1';	
+		v_group_id :=  cast(ltrim(vehicle_id_in,'TempGroup-') as bigint);
+		FOR mviews IN Select vehicle_id from fleet.group_tempvehicle_link where  group_vehicle_link_id = v_group_id loop
+			return next mviews.vehicle_id;
+		END LOOP;
+		
+		return;
+	end if;
+	
+
+	if(vehicle_id_in ilike 'All' and sub_client_in = '0') then
+--raise notice '1';	
+		FOR mviews IN SELECT v.vehicle_id FROM ct.vehicle v inner join ct.contract c on c.contract_id = v.current_contract_id and c.contract_state_id = 2 
+		where v.user_id = user_id_in and v.terminal_id > 0 LOOP
+			return next mviews.vehicle_id;
+		END LOOP;
+		RETURN;
+	end if;
+
+	-- SUB USER LIMIT MUST BE ADDED!!!
+
+	return next cast(vehicle_id_in as bigint);
+		
+
+	return;
+END
+$BODY$
+
